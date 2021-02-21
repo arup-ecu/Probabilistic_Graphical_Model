@@ -1,0 +1,229 @@
+---
+title: "CreditCard_Predict_v1"
+author: "Arup Ghosh"
+date: "2/20/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+# A Probabilistic Graphical Model (PGM)
+
+library("tidyverse") # a better data frame
+library("visNetwork") # for constructing BN graph using a Javascript library
+library("bnlearn") # for Bayesian network learning
+
+# Problem statement: Who gets Platinum Credit Card?
+
+Demographic predictors
+
+  - Age (A):  **ADULT** for individuals between 30 and 60 years old; and **MATURE** for people older than 60.
+  
+Socioeconomic indicators
+
+  - Education level (E): the highest level of education completed by the individual: Doctorate,Post Graduate,Graduate (**HIGH**), High School,uneducated (**LOW**).
+  - Income Category (I): more than 60K (**HIGH**) or less than 60K (**LOW**) 
+  - Marital Status (M):  **MARRIED** or **SINGLE**
+
+Prediction target
+
+  - Credit Card type (C):  **SILVER**, **GOLD**, or **PLATINUM**
+
+
+
+## Define the Bayesian network
+
+```{r define-nodes, echo=TRUE}
+dag <- empty.graph(nodes = c("A", "E", "I", "M", "C"))
+```
+
+```{r, echo=TRUE}
+dag
+```
+
+```{r define-edges, echo=TRUE}
+dag <- set.arc(dag, from = "E", to = "I")
+dag <- set.arc(dag, from = "A", to = "I")
+dag <- set.arc(dag, from = "A", to = "M")
+dag <- set.arc(dag, from = "I", to = "C")
+dag <- set.arc(dag, from = "M", to = "C")
+```
+
+```{r, echo=TRUE}
+dag
+```
+# Exploring the bn object
+
+```{r, echo=TRUE}
+nodes(dag)
+```
+
+```{r, echo=TRUE}
+arcs(dag)
+```
+
+
+# Joint probability as a product of conditional probabilitiies
+
+Use the `modelstring` function to generate the product of conditional probabilities.
+
+```{r, echo=TRUE}
+modelstring(dag)
+```
+# Specify joint probability distribution over the random variables
+
+
+```{r, echo=TRUE}
+A.lv <- c("ADULT", "MATURE") # age
+E.lv <- c("HIGH", "LOW") # education category
+I.lv <- c("HIGH", "LOW") # income category
+M.lv <- c("Married", "Single") # marital status
+C.lv <- c("Silver", "Gold","Platinum") # card type
+```
+
+#Marginal probability distributions for Education variables
+                
+E.prob <- array(c(.40,.60),dim=2,dimnames = list(E = E.lv))
+E.prob
+
+#Marginal probability distributions for Age variables
+                
+A.prob <- array(c(.40,.60),dim=2,dimnames = list(A = A.lv))
+A.prob
+
+#Conditional Probability Tables (CPTs) for Income Category variable are modeled using three-dimensional tables:
+
+I.prob <- array(c(.35,.65,.37,.63,.2,.8,.15,.85), dim = c(2, 2, 2),
+            dimnames = list(I = I.lv, E = E.lv, A = A.lv))
+I.prob
+
+#Conditional probability distributions for Marital Status variables:
+M.prob <- array(c(.46,.54,.45,.55), dim = c(2, 2),
+            dimnames = list(M = M.lv, A = A.lv))
+M.prob
+
+#Conditional Probability Tables (CPTs) for Credit Card Type variable are modeled using three-dimensional tables:
+
+C.prob <- array(c(.98,.01,.01,.98,.01,.01,.97,.02,.01,.98,.01,.01), dim = c(3, 2, 2),
+            dimnames = list(C = C.lv, I = I.lv, M = M.lv))
+C.prob
+
+# bn.fit class
+# We can combine our DAG defined earlier with CPTs to create an object of the bn.fit class:
+
+cpt <- list(A = A.prob, E = E.prob, I = I.prob, M = M.prob, 
+        C = C.prob)
+
+bn <- custom.fit(dag, cpt)
+
+#Number of parameters of the model:
+nparams(bn)
+
+#Number of edges in the model:
+arcs(bn)
+
+#Print all CPTs in the model:
+bn
+
+
+# Estimating the model parameters from an observed sample
+
+```{r, echo=TRUE}
+survey <- read.table("data/credit_card/BankChurners.csv", header = TRUE,sep=",")
+```
+
+
+```{r, echo=TRUE}
+class(survey)
+```
+```{r, echo=TRUE}
+str(survey)
+```
+
+```{r, echo=TRUE}
+names(survey)
+```
+
+```{r, echo=TRUE}
+class(survey$A)
+```
+```{r, echo=TRUE}
+survey[] <- lapply( survey, factor)
+```
+
+```{r, echo=TRUE}
+str(survey)
+```
+
+
+```{r, echo=TRUE}
+class(survey$A)
+```
+
+```{r, echo=TRUE}
+head(survey)
+```
+#In **bnlearn**, we compute MLE using the **bn.fit** function.
+
+dt = sort(sample(nrow(survey), nrow(survey)*.7))
+train<-survey[dt,]
+test<-survey[-dt,]
+
+
+
+options(digits = 3)
+bn.mle <- bn.fit(dag, data = train, method = "mle")
+
+bn.bayes <- bn.fit(dag, data = train, method = "bayes", 
+              iss = 10)
+bn.bayes$M
+
+bn.bayes <- bn.fit(dag, data = train, method = "bayes", 
+              iss = 30)
+bn.bayes$M
+
+#Network scores
+set.seed(456)
+options(digits = 6)
+score(dag, data = train, type = "bic")
+
+score(dag, data = test, type = "bic")
+
+rnd <- random.graph(nodes = c("E", "A", "I", "M", "C"))
+modelstring(rnd)
+
+score(rnd, data = train, type = "bic")
+score(rnd, data = test, type = "bic")
+
+learned <- hc(train)
+modelstring(learned)
+learned2 <- hc(train, score = "bde")
+options(digits=3)
+arc.strength(learned, data = train, criterion = "bic")
+arc.strength(dag, data = train, criterion = "bic")
+
+
+graphviz.plot(dag)
+
