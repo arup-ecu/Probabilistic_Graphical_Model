@@ -1,0 +1,11 @@
+The goal of the project is to predict cardit card category based on customer demograhic and economic parameters
+
+This data has 10000 observation and 5 variables
+	-Age
+	-Education
+	-Marital Status
+	-Income Category
+	-Credit Card Type
+Here target variable is Credit Card Type.
+
+Financial Domain knowledge guided me to build this data model.
