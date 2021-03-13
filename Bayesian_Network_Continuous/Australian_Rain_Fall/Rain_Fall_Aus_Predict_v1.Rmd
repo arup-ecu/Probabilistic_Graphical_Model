@@ -1,0 +1,362 @@
+---
+title: "Australia Rain Fall Prediction"
+author: "Arup Ghosh"
+date: "3/6/2021"
+output: html_document
+---
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+```{r libraries, include=TRUE}
+library("bnlearn")
+#library("ggdag")
+library("tidyverse")
+# library("visNetwork")
+library(lubridate)
+```
+# Application domain: Rain Forecast
+
+Rain Forecast depends on:
+
+- Maximum Temperature $MT$.
+
+- Sunshine $SS$.
+
+- Humidity at 9AM $H9AM$. Directly influenced by Maximum Temperature ($MT$) and Sunshine ($SS$).
+
+- Humidity at 3PM $H3PM$. Directly influenced by Sunshine ($SS$).
+
+- Rain in Tomorrow $RT$. Directly influenced by Humidity at 9AM ($H9AM$) and Humidity at 3PM $H3PM$.
+
+- Create the graphical model using the `model2network()` method.
+
+## Graphical model
+
+```{r, echo=TRUE}
+dag.bnlearn <- model2network("[MT][SS][H9AM|MT:SS][H3PM|SS][RT|H9AM:H3PM]")
+dag.bnlearn
+```
+## Graphical model Visualization
+```{r, echo=TRUE}
+#plot(dag.bnlearn)
+```
+
+## Distributions of variables
+
+- $\mathrm{MT} \sim N \left(24, \,\, 7^{2}\right)$
+
+- $\mathrm{SS} \sim N \left(9, \,\, 4^{2}\right)$
+
+- $\mathrm{H9AM} \mid \mathrm{MT}, \mathrm{SS} \sim N \left( 110 - 1.37 \cdot \mathrm{MT} - 2.13 \cdot \mathrm{SS}, \,\, 15^{2}\right)$
+
+- $\mathrm{H3PM} \mid \mathrm{SS} \sim N \left(73.47 - 4.42 \cdot \mathrm{SS}, \,\, 13.31^{2}\right)$
+
+- $\mathrm{RT} \mid \mathrm{H9AM}, \mathrm{H3PM} \sim N\left(-0.08 -0.0042\cdot  \mathrm{~H9AM} + 0.123 \cdot \mathrm{~H3PM}, \,\,  0.33^{2}\right)$
+
+&nbsp; &nbsp; &nbsp;
+
+## Exploring independencies using the `dsep` function of the `bnlearn` library
+
+
+```{r, echo=TRUE}
+nodes <- nodes(dag.bnlearn)
+  for (n1 in nodes) {
+    for (n2 in nodes) {
+      if (dsep(dag.bnlearn, n1, n2))
+        cat(n1, "and", n2, "are independent.\n")
+    }
+  }
+```
+
+- Independence is symmetric.
+
+```{r, echo=TRUE}
+dsep(dag.bnlearn, "MT", "MT")
+dsep(dag.bnlearn, "SS", "SS")
+dsep(dag.bnlearn, "H9AM", "H9AM")
+```
+
+- Find which pairs of variables are conditionally independent given $H9AM$
+
+```{r, echo=TRUE}
+nodes <- nodes(dag.bnlearn)
+for (n1 in nodes[nodes != "H9AM"]) {
+  for (n2 in nodes[nodes != "H9AM"]) {
+    if (n1 < n2) {
+      if (dsep(dag.bnlearn, n1, n2, "H9AM"))
+        cat(n1, "and", n2, "are independent given H9AM.\n")
+    }
+  }
+}
+```
+
+
+
+- Find which pairs of variables are conditionally independent given $H3PM$
+
+```{r, echo=TRUE}
+nodes <- nodes(dag.bnlearn)
+for (n1 in nodes[nodes != "H3PM"]) {
+  for (n2 in nodes[nodes != "H3PM"]) {
+    if (n1 < n2) {
+      if (dsep(dag.bnlearn, n1, n2, "H3PM"))
+        cat(n1, "and", n2, "are independent given H3PM.\n")
+    }
+  }
+}
+```
+
+- Is there a path from $MT$ to $RT$?
+
+```{r, echo=TRUE}
+bnlearn::path(dag.bnlearn, from = "MT", to = "RT")
+```
+
+- Is there a path from $SS$ to $RT$?
+
+```{r, echo=TRUE}
+bnlearn::path(dag.bnlearn, from = "SS", to = "RT")
+```
+# Specifying the joint probability distribution
+```{r, echo=TRUE}
+distMT <- list(coef = c("(Intercept)" = 24), sd = 7)
+distSS <- list(coef = c("(Intercept)" = 9), sd = 4)
+distH9AM <- list(coef = c("(Intercept)" = 110, MT = -1.37, SS = -2.13), sd = 15)
+distH3PM <- list(coef = c("(Intercept)" = 73.47, SS = -4.42), sd = 13.31)
+distRT <- list(coef = c("(Intercept)" = 0, H9AM = 0, H3PM = 0), sd = 0.33)
+dist.list = list(MT = distMT, SS = distSS, H9AM = distH9AM, H3PM = distH3PM, RT = distRT)
+```
+# Gaussian Bayesian networks (GBNs)
+
+- All variables are normally distributed.
+
+- Root nodes (i.e., nodes without any parent), are characterized by their marginal distributions.
+
+- The conditioning effect of the parent nodes is given by an additive linear term in the mean; variance is not affected -- each node has a variance that is specific to that node and does not depend on the values of the parents.
+
+- A node's local distribution expressed as a Gaussian linear model (an intercept and the node's parents as
+explanatory variables; no interaction terms).
+
+```{r, echo=TRUE}
+gbn.bnlearn <- custom.fit(dag.bnlearn, dist = dist.list)
+```
+
+
+```{r, echo=TRUE}
+gbn.bnlearn$SS
+```
+
+
+```{r, echo=TRUE}
+gbn.bnlearn$RT
+```
+## rbmn R package for GBNs
+
+- Convert the `gbn.bnlearn` (a `bn.fit` object) to `rbmn` native format.
+
+```{r, echo=TRUE}
+library(rbmn)
+gbn.rbmn <- bnfit2nbn(gbn.bnlearn)
+```
+```{r, echo=TRUE}
+gema.rbmn <- nbn2gema(gbn.rbmn)
+mn.rbmn <- gema2mn(gema.rbmn)
+print8mn(mn.rbmn)
+```
+
+
+- Assumption: The joint distribution of all nodes (i.e., the global distribution) is a **multivariate normal distribution**.
+
+\begin{equation}
+f(\mathrm{MT}, \mathrm{SS}, \mathrm{H9AM}, \mathrm{H3PM}, \mathrm{RT}) = f(\mathrm{MT}) \, f(\mathrm{SS})  \, f(\mathrm{H9AM} \mid \mathrm{MT}, \mathrm{SS}) \,  f(\mathrm{H3PM} \mid \mathrm{SS}) \, f(\mathrm{RT} \mid \mathrm{H9AM}, \mathrm{H3PM})
+\end{equation}
+
+- Numeric derivation of the parameters of the **multivariate normal distribution**. 
+
+```{r, echo=TRUE}
+gema.rbmn <- nbn2gema(gbn.rbmn)
+mn.rbmn <- gema2mn(gema.rbmn)
+print8mn(mn.rbmn)
+```
+- Structure of the `mn.rbmn` object
+
+```{r, echo=TRUE}
+str(mn.rbmn)
+```
+
+
+
+
+
+# Read the dataset
+
+```{r, include=TRUE}
+rain.df <- read.csv("Data/RainFallAus/weatherAUS.csv",nrows = 8000)[ ,c("MaxTemp", "Sunshine","Humidity9am","Humidity3pm", "RainTomorrow" )]
+
+```
+
+# Training Data and Test Data split
+```{r, echo=TRUE}
+dt = sort(sample(nrow(rain.df), nrow(rain.df)*.8))
+train<-rain.df[dt,]
+test<-rain.df[-dt,]
+```
+
+
+```{r, echo=TRUE}
+dim(train)
+str(train)
+```
+```{r, echo=TRUE}
+library(GGally)
+## Max Temperature (MT)
+#mean
+mean(train$MaxTemp,na.rm = TRUE)
+#standard deviation
+sd(train$MaxTemp,na.rm = TRUE)
+
+## Sunshine (SS)
+#mean
+mean(train$Sunshine,na.rm = TRUE)
+#standard deviation
+sd(train$Sunshine,na.rm = TRUE)
+
+
+## Humidity 9AM (Humidity9am)
+model_h9am <- lm(train$Humidity9am ~ train$MaxTemp + train$Sunshine , na.rm = TRUE)
+#mean
+coef(model_h9am)
+#standard deviation
+summary(model_h9am)$sigma
+
+## Humidity 3PM (Humidity3pm)
+model_h3pm <- lm(train$Humidity3pm ~ train$Sunshine , na.rm = TRUE)
+#mean
+coef(model_h3pm)
+#standard deviation
+summary(model_h3pm)$sigma
+
+## Rain Tomorrow (RT)
+model_rt <- lm(train$RainTomorrow ~ train$Humidity9am + train$Humidity3pm , na.rm = TRUE)
+#mean
+coef(model_rt)
+#standard deviation
+summary(model_rt)$sigma
+
+```
+- For continuous data, `bn.fit` implements only **mle**  estimator.
+
+
+```{r, echo=TRUE}
+str(train)
+
+train$Sunshine <- as.numeric(train$Sunshine, na.rm = TRUE)
+train$Humidity9am <- as.numeric(train$Humidity9am, na.rm = TRUE)
+train$Humidity3pm <- as.numeric(train$Humidity3pm, na.rm = TRUE)
+train$RainTomorrow <- as.numeric(train$RainTomorrow, na.rm = TRUE)
+#train[] <- lapply( train, factor)
+str(train)
+
+names(train)
+names(train)[names(train) == "MaxTemp"] <- "MT"
+names(train)[names(train) == "Sunshine"] <- "SS"
+names(train)[names(train) == "Humidity9am"] <- "H9AM"
+names(train)[names(train) == "Humidity3pm"] <- "H3PM"
+names(train)[names(train) == "RainTomorrow"] <- "RT"
+
+```
+# Estimating the model parameters: Correlation coefficients
+
+- We assume that the structure of the GBN is known.
+
+- 200 observations are generated from the GBN and saved in a data frame (cropdata1).
+
+
+```{r, echo=TRUE}
+set.seed(4567)
+raindata1 <- rbn(gbn.bnlearn, n = 200)
+set.seed(1234)
+raindata2 <- rbn(gbn.bnlearn, n = 20000)
+str(raindata2)
+```
+```{r, echo=TRUE}
+est.para <- bn.fit(dag.bnlearn, method = "mle", data = raindata1,na.rm = TRUE)
+```
+```{r, echo=TRUE}
+est.para$RT <- lm(RT ~ H9AM + H3PM, data = raindata1, na.rm = TRUE)
+est.para$H9AM <- lm(H9AM ~ MT + SS, data = raindata1, na.rm = TRUE)
+
+```
+- Ridge regression for the random variable $RT$
+
+```{r, echo=TRUE}
+library(penalized)
+est.para$RT <- penalized(RT ~ H9AM + H3PM, lambda1 = 0, lambda2 = 1.5, data = raindata1)
+```
+```{r, echo=TRUE}
+est.para$RT
+```
+```{r, echo=TRUE}
+est.para$RT <- lm(RT ~ H9AM + H3PM - 1, data = raindata1)
+est.para$RT
+```
+- Parameter estimates are based only on the subset of the original data frame spanning the considered node and its parents.
+
+```{r, echo=TRUE}
+lmRT <- lm(RT ~ H9AM + H3PM, data = raindata1[, c("H9AM", "H3PM", "RT")])
+coef(lmRT)
+```
+```{r, echo=TRUE}
+confint(lmRT)
+```
+```{r, echo=TRUE}
+cormat <- cor(raindata1[, c("RT", "H3PM", "H9AM")])
+cormat
+```
+```{r, echo=TRUE}
+library(corpcor)
+invcor <- cor2pcor(cormat)
+dimnames(invcor) <- dimnames(cormat)
+invcor
+```
+## Structure learning
+
+
+
+```{r, echo=TRUE}
+stru1 <- iamb(raindata1, test = "cor")
+stru1
+```
+```{r, echo=TRUE}
+library(DiagrammeR)
+DiagrammeR::mermaid("
+  graph TB
+  mt((MT)) --> h9am((H9AM))
+  ss((SS)) --> h9am((H9AM))
+  ss((SS)) --> h3pm((H3PM))
+  h9am((H9AM)) --> rt((RT))
+  h3pm((H3PM)) --> rt((RT))
+")
+```
+## Network scores
+- Bayesian Gaussian equivalent score (BGe) -- posterior probability score in common use is an uniform prior over the space of DAGs and of the parameters.
+
+
+```{r, echo=TRUE}
+score(dag.bnlearn, data = raindata2, type = "bic-g")
+```
+
+```{r, echo=TRUE}
+score(dag.bnlearn, data = raindata2, type = "bge")
+```
+```{r, echo=TRUE}
+print8nbn(gbn.rbmn)
+```
+
+
+```{r, echo=TRUE}
+print8gema(gema.rbmn)
+```
