@@ -11,29 +11,19 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## R Markdown
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
-```
-
-## Including Plots
-
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
-```
-
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
 
 # A Probabilistic Graphical Model (PGM)
-
+```{r libraries, include=FALSE}
+library(ggplot2)
+library(dplyr)
+library(reshape2)
+library(gridExtra)
+library(GGally) # ggpairs() for scatterplot matrix
+library(RColorBrewer)
 library("tidyverse") # a better data frame
 library("visNetwork") # for constructing BN graph using a Javascript library
 library("bnlearn") # for Bayesian network learning
+```
 
 # Problem statement: Who gets Platinum Credit Card?
 
@@ -51,7 +41,47 @@ Prediction target
 
   - Credit Card type (C):  **SILVER**, **GOLD**, or **PLATINUM**
 
+## Read the dataset-Data Aalysis
+```{r, include=TRUE}
+credit_card.df <- read.csv("Data/credit_card/BankChurners.csv")
+class(credit_card.df)
+names(credit_card.df)
+dim(credit_card.df)
+str(credit_card.df)
+summary(credit_card.df)
+```
 
+# Boxplots
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+credit_card.df$E = as.factor(credit_card.df$I)
+
+ggplot(aes(x = E, y = I), data = credit_card.df) +
+  geom_boxplot(color="aquamarine4") +
+  geom_jitter(alpha = 0.1, color="firebrick")+
+  coord_cartesian(ylim=c(0, 35))
+
+ggplot(aes(x = A, y = I), data = credit_card.df) +
+  geom_boxplot(color="aquamarine4") +
+  geom_jitter(alpha = 0.1, color="firebrick")+
+  coord_cartesian(ylim=c(0, 35))
+
+ggplot(aes(x = A, y = M), data = credit_card.df) +
+  geom_boxplot(color="aquamarine4") +
+  geom_jitter(alpha = 0.1, color="firebrick")+
+  coord_cartesian(ylim=c(0, 35))
+
+ggplot(aes(x = M, y = C), data = credit_card.df) +
+  geom_boxplot(color="aquamarine4") +
+  geom_jitter(alpha = 0.1, color="firebrick")+
+  coord_cartesian(ylim=c(0, 35))
+
+ggplot(aes(x = I, y = C), data = credit_card.df) +
+  geom_boxplot(color="aquamarine4") +
+  geom_jitter(alpha = 0.1, color="firebrick")+
+  coord_cartesian(ylim=c(0, 35))
+
+```
 
 ## Define the Bayesian network
 
@@ -104,48 +134,58 @@ C.lv <- c("Silver", "Gold","Platinum") # card type
 ```
 
 #Marginal probability distributions for Education variables
-                
+```{r, echo=TRUE}                
 E.prob <- array(c(.40,.60),dim=2,dimnames = list(E = E.lv))
 E.prob
+```
 
 #Marginal probability distributions for Age variables
-                
+```{r, echo=TRUE}                
 A.prob <- array(c(.40,.60),dim=2,dimnames = list(A = A.lv))
 A.prob
+```
 
 #Conditional Probability Tables (CPTs) for Income Category variable are modeled using three-dimensional tables:
-
+```{r, echo=TRUE}
 I.prob <- array(c(.35,.65,.37,.63,.2,.8,.15,.85), dim = c(2, 2, 2),
             dimnames = list(I = I.lv, E = E.lv, A = A.lv))
 I.prob
+```
 
 #Conditional probability distributions for Marital Status variables:
+```{r, echo=TRUE}
 M.prob <- array(c(.46,.54,.45,.55), dim = c(2, 2),
             dimnames = list(M = M.lv, A = A.lv))
 M.prob
+```
 
 #Conditional Probability Tables (CPTs) for Credit Card Type variable are modeled using three-dimensional tables:
-
+```{r, echo=TRUE}
 C.prob <- array(c(.98,.01,.01,.98,.01,.01,.97,.02,.01,.98,.01,.01), dim = c(3, 2, 2),
             dimnames = list(C = C.lv, I = I.lv, M = M.lv))
 C.prob
-
+```
 # bn.fit class
 # We can combine our DAG defined earlier with CPTs to create an object of the bn.fit class:
-
+```{r, echo=TRUE}
 cpt <- list(A = A.prob, E = E.prob, I = I.prob, M = M.prob, 
         C = C.prob)
 
 bn <- custom.fit(dag, cpt)
-
+```
 #Number of parameters of the model:
+```{r, echo=TRUE}
 nparams(bn)
-
+```
 #Number of edges in the model:
+```{r, echo=TRUE}
 arcs(bn)
-
+```
 #Print all CPTs in the model:
+```{r, echo=TRUE}
 bn
+
+```
 
 
 # Estimating the model parameters from an observed sample
@@ -185,14 +225,16 @@ class(survey$A)
 ```{r, echo=TRUE}
 head(survey)
 ```
-#In **bnlearn**, we compute MLE using the **bn.fit** function.
 
+# Training Data and Test Data split
+```{r, echo=TRUE}
 dt = sort(sample(nrow(survey), nrow(survey)*.7))
 train<-survey[dt,]
 test<-survey[-dt,]
+```
 
-
-
+#In **bnlearn**, we compute MLE using the **bn.fit** function.
+```{r, echo=TRUE}
 options(digits = 3)
 bn.mle <- bn.fit(dag, data = train, method = "mle")
 
@@ -203,8 +245,9 @@ bn.bayes$M
 bn.bayes <- bn.fit(dag, data = train, method = "bayes", 
               iss = 30)
 bn.bayes$M
-
+```
 #Network scores
+```{r, echo=TRUE}
 set.seed(456)
 options(digits = 6)
 score(dag, data = train, type = "bic")
@@ -216,14 +259,17 @@ modelstring(rnd)
 
 score(rnd, data = train, type = "bic")
 score(rnd, data = test, type = "bic")
+```
 
+```{r, echo=TRUE}
 learned <- hc(train)
 modelstring(learned)
 learned2 <- hc(train, score = "bde")
 options(digits=3)
 arc.strength(learned, data = train, criterion = "bic")
 arc.strength(dag, data = train, criterion = "bic")
-
-
+```
+#Plot the model
+```{r, echo=TRUE}
 graphviz.plot(dag)
-
+```
